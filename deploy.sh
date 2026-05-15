@@ -83,7 +83,32 @@ aws cloudformation deploy \
     SubnetId="$SUBNET_ID" \
   --no-fail-on-empty-changeset
 
-# ─── 3. Grab the Elastic IP from stack outputs ────────────────────────────────
+# ─── 3. Upload system prompt to S3 ───────────────────────────────────────────
+echo "==> Uploading system prompt to S3..."
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+AWS_REGION=$(aws configure get region 2>/dev/null || echo "us-east-1")
+BUCKET="github-mcp-workshop-$ACCOUNT_ID"
+
+if ! aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
+  if [[ "$AWS_REGION" == "us-east-1" ]]; then
+    aws s3api create-bucket --bucket "$BUCKET" --region "$AWS_REGION" >/dev/null
+  else
+    aws s3api create-bucket --bucket "$BUCKET" --region "$AWS_REGION" \
+      --create-bucket-configuration LocationConstraint="$AWS_REGION" >/dev/null
+  fi
+fi
+
+aws s3api put-public-access-block --bucket "$BUCKET" \
+  --public-access-block-configuration \
+  "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false"
+
+aws s3 cp "$SCRIPT_DIR/sys_prompt.txt" "s3://$BUCKET/system-prompt.txt" \
+  --acl public-read --content-type "text/plain" >/dev/null
+
+PROMPT_URL="https://$BUCKET.s3.$AWS_REGION.amazonaws.com/system-prompt.txt"
+echo "  Uploaded: $PROMPT_URL"
+
+# ─── 5. Grab the Elastic IP from stack outputs ────────────────────────────────
 echo "==> Reading stack outputs..."
 EC2_HOST=$(aws cloudformation describe-stacks \
   --stack-name "$STACK_NAME" \
