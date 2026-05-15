@@ -102,8 +102,19 @@ aws s3api put-public-access-block --bucket "$BUCKET" \
   --public-access-block-configuration \
   "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false"
 
+aws s3api put-bucket-policy --bucket "$BUCKET" --policy "{
+  \"Version\": \"2012-10-17\",
+  \"Statement\": [{
+    \"Sid\": \"PublicReadSystemPrompt\",
+    \"Effect\": \"Allow\",
+    \"Principal\": \"*\",
+    \"Action\": \"s3:GetObject\",
+    \"Resource\": \"arn:aws:s3:::$BUCKET/system-prompt.txt\"
+  }]
+}"
+
 aws s3 cp "$SCRIPT_DIR/sys_prompt.txt" "s3://$BUCKET/system-prompt.txt" \
-  --acl public-read --content-type "text/plain" >/dev/null
+  --content-type "text/plain" >/dev/null
 
 PROMPT_URL="https://$BUCKET.s3.$AWS_REGION.amazonaws.com/system-prompt.txt"
 echo "  Uploaded: $PROMPT_URL"
