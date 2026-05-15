@@ -1,0 +1,157 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  GitHub MCP Workshop Proxy - EC2 infrastructure.
+  Creates a security group, Elastic IP, IAM role, and Ubuntu 24.04 instance.
+  App code is deployed separately by deploy.sh after the stack is up.
+
+Parameters:
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: EC2 key pair name for SSH access
+
+  InstanceType:
+    Type: String
+    Default: t3.small
+    AllowedValues: [t3.micro, t3.small, t3.medium]
+    Description: t3.small handles ~50 participants; use t3.medium for 100+
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC to deploy into (your default VPC is fine)
+
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: A public subnet in the VPC above
+
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+    Description: Ubuntu 24.04 LTS AMI - resolved automatically, no need to change
+
+Resources:
+
+  # ── Security group ──────────────────────────────────────────────────────────
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: github-mcp-proxy - SSH / HTTP / HTTPS
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - Description: SSH
+          IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - Description: HTTP
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - Description: HTTP v6
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIpv6: ::/0
+        - Description: HTTPS
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - Description: HTTPS v6
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIpv6: ::/0
+      Tags:
+        - Key: Name
+          Value: github-mcp-proxy
+
+  # ── IAM role - allows SSM Session Manager (no SSH required if preferred) ────
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub github-mcp-proxy-${AWS::StackName}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref InstanceRole
+
+  # ── Static IP ───────────────────────────────────────────────────────────────
+  ElasticIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: github-mcp-proxy
+
+  # ── EC2 instance ─────────────────────────────────────────────────────────────
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds:
+        - !GetAtt SecurityGroup.GroupId
+      IamInstanceProfile: !Ref InstanceProfile
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 8
+            VolumeType: gp3
+            DeleteOnTermination: true
+      UserData:
+        # Installs system packages during first boot so deploy.sh doesn't
+        # have to wait for apt on subsequent re-deploys (code-only changes).
+        Fn::Base64: |
+          #!/bin/bash
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -q
+          apt-get install -y -q \
+            python3 python3-venv python3-pip \
+            nginx certbot python3-certbot-nginx \
+            docker.io
+          systemctl enable nginx
+          systemctl enable docker
+          systemctl start docker
+      Tags:
+        - Key: Name
+          Value: github-mcp-proxy
+
+  EIPAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      InstanceId: !Ref Instance
+      AllocationId: !GetAtt ElasticIP.AllocationId
+
+Outputs:
+  PublicIP:
+    Description: Static Elastic IP (survives stop/start)
+    Value: !Ref ElasticIP
+    Export:
+      Name: !Sub ${AWS::StackName}-PublicIP
+
+  InstanceId:
+    Description: EC2 instance ID
+    Value: !Ref Instance
+
+  HealthCheckURL:
+    Description: Health check endpoint (available after deploy.sh completes)
+    Value: !Sub http://${ElasticIP}/health
+
+  SSHHint:
+    Description: SSH command template
+    Value: !Sub ssh -i <your-key.pem> ubuntu@${ElasticIP}
