@@ -4,6 +4,7 @@ Create IAM users for workshop participants.
 
 Usage:
     AWS_PROFILE=epitech python scripts/create_users.py participants.txt
+    AWS_PROFILE=epitech python scripts/create_users.py participants.txt --dry-run
 
 Input: plain text file, one participant name per line.
 Output: workshop_credentials.csv with username, password, console URL.
@@ -11,6 +12,7 @@ Output: workshop_credentials.csv with username, password, console URL.
 
 import csv
 import json
+import os
 import re
 import secrets
 import string
@@ -18,8 +20,6 @@ import sys
 
 import boto3
 from botocore.exceptions import ClientError
-
-import os
 
 GROUP = "workshop-participants"
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
@@ -62,14 +62,12 @@ def ensure_group(iam, account_id):
         else:
             raise
 
-    # Attach managed Bedrock policy
     try:
         iam.attach_group_policy(GroupName=GROUP, PolicyArn=BEDROCK_POLICY_ARN)
     except ClientError as e:
         if e.response["Error"]["Code"] != "EntityAlreadyExists":
             raise
 
-    # Put inline policy for AgentCore + Secrets Manager
     iam.put_group_policy(
         GroupName=GROUP,
         PolicyName=AGENTCORE_POLICY_NAME,
@@ -78,7 +76,7 @@ def ensure_group(iam, account_id):
     print(f"  Policies attached to {GROUP}")
 
 
-def create_user(iam, username, console_url):
+def create_user(iam, username):
     try:
         iam.create_user(UserName=username)
     except ClientError as e:
@@ -98,11 +96,15 @@ def create_user(iam, username, console_url):
 
 
 def main():
-    if len(sys.argv) != 2:
-        print("Usage: python scripts/create_users.py <participants.txt>")
+    args = sys.argv[1:]
+    dry_run = "--dry-run" in args
+    args = [a for a in args if a != "--dry-run"]
+
+    if len(args) != 1:
+        print("Usage: python scripts/create_users.py <participants.txt> [--dry-run]")
         sys.exit(1)
 
-    participants_file = sys.argv[1]
+    participants_file = args[0]
     try:
         with open(participants_file) as f:
             names = [line.strip() for line in f if line.strip()]
@@ -120,10 +122,21 @@ def main():
     account_id = sts.get_caller_identity()["Account"]
     console_url = f"https://{account_id}.signin.aws.amazon.com/console?region={AWS_REGION}"
 
-    print(f"Account : {account_id}")
-    print(f"Console : {console_url}")
-    print(f"Users   : {len(names)}")
+    print(f"Account  : {account_id}")
+    print(f"Console  : {console_url}")
+    print(f"Users    : {len(names)}")
+    if dry_run:
+        print("DRY RUN  : no changes will be made")
     print()
+
+    if dry_run:
+        existing = set()
+        for name in names:
+            username = to_username(name, existing)
+            existing.add(username)
+            print(f"  [dry] {username}")
+        print(f"\nWould create {len(names)} user(s) in group {GROUP}.")
+        return
 
     ensure_group(iam, account_id)
     print()
@@ -135,7 +148,7 @@ def main():
     for name in names:
         username = to_username(name, existing)
         existing.add(username)
-        password, status = create_user(iam, username, console_url)
+        password, status = create_user(iam, username)
         if status == "created":
             created += 1
             rows.append({"name": name, "username": username, "password": password, "account_id": account_id, "console_url": console_url})
