@@ -29,7 +29,21 @@ AGENTCORE_POLICY = json.dumps({
     "Version": "2012-10-17",
     "Statement": [{
         "Effect": "Allow",
-        "Action": ["bedrock-agentcore:*", "secretsmanager:*", "vpc-lattice:*"],
+        "Action": [
+            "bedrock-agentcore:*",
+            "secretsmanager:*",
+            "vpc-lattice:*",
+            "iam:CreateRole",
+            "iam:DeleteRole",
+            "iam:AttachRolePolicy",
+            "iam:DetachRolePolicy",
+            "iam:PutRolePolicy",
+            "iam:DeleteRolePolicy",
+            "iam:GetRole",
+            "iam:PassRole",
+            "iam:ListRoles",
+            "iam:TagRole"
+        ],
         "Resource": "*",
     }],
 })
