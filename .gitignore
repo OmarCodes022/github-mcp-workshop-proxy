@@ -16,3 +16,4 @@ venv/
 *.txt
 !sys_prompt.txt
 !requirements.txt
+*.csv
