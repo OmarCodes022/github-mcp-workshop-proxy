@@ -19,7 +19,10 @@ import sys
 import boto3
 from botocore.exceptions import ClientError
 
+import os
+
 GROUP = "workshop-participants"
+AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 BEDROCK_POLICY_ARN = "arn:aws:iam::aws:policy/AmazonBedrockFullAccess"
 AGENTCORE_POLICY_NAME = "workshop-agentcore-access"
 AGENTCORE_POLICY = json.dumps({
@@ -115,7 +118,7 @@ def main():
     sts = boto3.client("sts")
 
     account_id = sts.get_caller_identity()["Account"]
-    console_url = f"https://{account_id}.signin.aws.amazon.com/console?region=us-east-1"
+    console_url = f"https://{account_id}.signin.aws.amazon.com/console?region={AWS_REGION}"
 
     print(f"Account : {account_id}")
     print(f"Console : {console_url}")
